@@ -5,7 +5,6 @@ import re, HTMLParser as hp
 class Selector:
     """ initialization """
     def __init__(self, parsed_html):
-        self._find_buffer = {}
         self._root = parsed_html
         self._cursor = parsed_html
 
@@ -61,7 +60,7 @@ class Selector:
 
         for x in tag['children']:
             buf = self._find(selector, x)
-            tag_list += buf
+            tag_list.extend(buf)
 
         return tag_list
 
@@ -70,8 +69,6 @@ class Selector:
         parts = selector.split(' ')
         tag_list = []
         current_tag = self._cursor
-
-        self._find_buffer = {}
 
         for part in parts:
             part = part.strip()
@@ -83,17 +80,12 @@ class Selector:
                     current_tag_backup = current_tag_backup['children']
                 current_tag = []
                 for c in current_tag_backup:
-                    for d in self._find(part, c)[:]:
-                        found_key = str(d)
-                        if found_key in self._find_buffer:
-                            continue
-                        current_tag.append(d)
-                        self._find_buffer[found_key] = 1
+                    current_tag.extend(self._find(part, c))
             else:
                 current_tag = self._find(part, current_tag)
 
             if part in parts[-1]:
-                tag_list += current_tag
+                tag_list.extend(current_tag)
 
         self._cursor = tag_list
 
@@ -163,18 +155,6 @@ class Parser(hp.HTMLParser):
                 'children': children
             }
     _createTag = staticmethod(_createTag)
-
-    """ private method """
-    def _find(self, selector, tag):
-        tag_list = []
-
-        if self._selectorMatch(selector, tag):
-            tag_list.append(tag)
-
-        for x in tag['children']:
-            buf = self._find(selector, x)
-            tag_list += buf
-        return tag_list
 
     """ public method """
     def read(self):
