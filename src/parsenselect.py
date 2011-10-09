@@ -1,24 +1,27 @@
 #!/usr/local/bin/python
 # -*- coding: UTF-8 -*-
-import re, HTMLParser as hp
+import re, copy, HTMLParser as hp
 
 class Selector:
-    """ initialization """
+    ''' ----- initialization ----- '''
     def __init__(self, parsed_html):
-        self._root = parsed_html
-        self._cursor = parsed_html
-
-    """ static method """
-    def _selectorMatch(selector, tag):
+        self._root = None
+        self._cursor = None
+        self._init(parsed_html)
+    
+    ''' ----- static methods ----- '''
+    @staticmethod
+    def _selector_match(selector, tag):
         selector_divide = []
         match_attr = None
-
-        a_key, a_value = None, None
+        
+        attr_m = None
         if '[' in selector:  # attribute
-            pattern = re.compile(r".*\[(.+)\]")
-            m = pattern.match(selector)
-            a_key, a_value = map(lambda x: x.strip('\'"'), m.group(1).split('='))
-            selector = pattern.sub('', selector)
+            attr_pattern = re.compile(r'\w*\[([a-zA-Z0-9_\-]+)([=~\|\^\$\*]?)=?[\'"]?([^\]\'"]*)[\'"]?\]$')
+            m = attr_pattern.search(selector)
+            if m:
+                attr_m = m.groups()
+                selector = attr_pattern.sub('', selector)
 
         if '#' in selector:  # id
             selector_divide = selector.split('#')
@@ -29,33 +32,55 @@ class Selector:
         else:  # tag
             selector_divide = [selector, '']
 
-        if a_key is not None:
-            selector_divide.append((a_key, a_value))
+        if attr_m is not None:
+            selector_divide.append(attr_m)
 
-        res = True
         for i in range(len(selector_divide)):
             e = selector_divide[i]
 
             if e == '':
                 continue
             if i == 0:  # tag part
-                res = res and (tag['name'] == e)
+                if tag['name'] != e:
+                    return False
             elif i == 1:  # decorator part
-                if match_attr == 'id':
-                    res = res and ('id' in tag['attributes'].keys() and tag['attributes']['id'] == e)
-                elif match_attr == 'class':
-                    res = res and ('class' in tag['attributes'].keys() and e in tag['attributes']['class'])
+                if match_attr not in tag['attributes']:
+                    return False
+                if match_attr == 'id' and tag['attributes']['id'] != e:
+                    return False
+                if match_attr == 'class' and e not in tag['attributes']['class']:
+                    return False
             elif i== 2:  # attributes part
-                res = res and (e[0] in tag['attributes'].keys() and tag['attributes'][e[0]] == e[1])
+                a_attr, a_operator, a_value = e
+                if a_attr not in tag['attributes']:
+                    return False
+                    
+                val = tag['attributes'][a_attr]
+                
+                if a_operator == '=' and val != a_value:
+                    return False
+                if a_operator == '~' and not(re.search(r'(^|\\s)'+a_value+'(\\s|$)',  val)):
+                    return False
+                if a_operator == '|' and not(re.search(r'^'+a_value+'-?', val)):
+                    return False
+                if a_operator == '^' and val.find(a_value) != 0:
+                    return False
+                if a_operator == '$' and val.rfind(a_value) != (len(val)-len(a_value)):
+                    return False
+                if a_operator == '*' and a_value not in val:
+                    return False
 
-        return res
-    _selectorMatch = staticmethod(_selectorMatch)
+        return True
 
-    """ private method """
+    ''' ----- private method ----- '''
+    def _init(self, parsed_html):
+        self._root = parsed_html
+        self._cursor = parsed_html
+    
     def _find(self, selector, tag):
         tag_list = []
 
-        if self._selectorMatch(selector, tag):
+        if self._selector_match(selector, tag):
             tag_list.append(tag)
 
         for x in tag['children']:
@@ -64,7 +89,7 @@ class Selector:
 
         return tag_list
 
-    """ public method """
+    ''' ----- public method ----- '''
     def find(self, selector):
         parts = selector.split(' ')
         tag_list = []
@@ -91,33 +116,48 @@ class Selector:
 
         return tag_list
 
+    def walk_to(self, *walk_route):
+        for step in walk_route:
+            step = int(step)
+            if type(self._cursor) is type([]):
+                self._cursor = self._cursor[step]
+            elif type(self._cursor) is type({}):
+                self._cursor = self._cursor['children'][step]
+        return self
+    
+    def walk(self, *walk_route):
+        start = copy.deepcopy(self._cursor)
+        out = self.walk_to(*walk_route).get_cursor()
+        self._cursor = start
+        return out
+        
+    
     def reset(self):
         self._cursor = self._root
         return self
 
-    def setRoot(self, parsed_html):
-        self._root = parsed_html
-        self._cursor = parsed_html
+    def set_root(self, parsed_html):
+        self._init(parsed_html)
         return self
 
-    def getRoot(self):
-        return self._root
+    def get_root(self):
+        return copy.deepcopy(self._root)
 
-    def getCursor(self):
-        return self._cursor
+    def get_cursor(self):
+        return copy.deepcopy(self._cursor)
 
 
 class Parser(hp.HTMLParser):
-    """ initialization """
+    ''' ----- initialization ----- '''
     def __init__(self, html_data=None):
         hp.HTMLParser.__init__(self)
-        self._root = self._createTag('')
+        self._root = self._create_tag('')
         self._cursor = None
 
         if html_data != None:
             self.parse( html_data )
 
-    """ interfaces implementation """
+    ''' ----- interfaces implementation ----- '''
     def handle_starttag(self, name, attr):
         if self._cursor is None:
             parent = self._root
@@ -131,13 +171,14 @@ class Parser(hp.HTMLParser):
             else:
                 attr_hash[a_key] = a_value
 
-        tag = self._createTag(name, attributes=attr_hash, parent=parent, children=[])
+        tag = self._create_tag(name, attributes=attr_hash, parent=parent)
         parent['children'].append(tag)
 
         self._cursor = tag
 
     def handle_data(self, data):
-        self._cursor['data'] = data
+        self._cursor['data'] += data
+        self._cursor['dataSet'].append(data)
 
     def handle_endtag(self, tag):
         self._cursor = self._cursor['parent']
@@ -145,20 +186,23 @@ class Parser(hp.HTMLParser):
             self._cursor['children'][i]['parent'] = None
             del self._cursor['children'][i]['parent']
 
-    """ static method """
-    def _createTag(name, data='', attributes={}, parent=None, children=[]):
-        return {
-                'name': name,
-                'data': data,
-                'attributes': attributes,
-                'parent': parent,
-                'children': children
-            }
-    _createTag = staticmethod(_createTag)
+    ''' ----- static method ----- '''
+    @staticmethod
+    def _create_tag(name, **kwargs):
+        out = {
+            'name': name,
+            'data': '',
+            'dataSet':  [],
+            'attributes': {},
+            'parent': None,
+            'children': []
+        }
+        out.update(kwargs)
+        return out
 
-    """ public method """
-    def read(self):
-        return self._root
+    ''' ----- public method ----- '''
+    def fetch(self):
+        return copy.deepcopy(self._root)
 
     def parse(self, html_data):
         if type(html_data) is type(''):
