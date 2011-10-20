@@ -89,6 +89,15 @@ class Selector:
 
         return tag_list
 
+    def _walk_to(self, *walk_route):
+        for step in walk_route:
+            step = int(step)
+            if type(self._cursor) is type([]):
+                self._cursor = self._cursor[step]
+            elif type(self._cursor) is type({}):
+                self._cursor = self._cursor['children'][step]
+        return self
+		
     ''' ----- public method ----- '''
     def find(self, selector):
         parts = selector.split(' ')
@@ -115,19 +124,10 @@ class Selector:
         self._cursor = tag_list
 
         return tag_list
-
-    def walk_to(self, *walk_route):
-        for step in walk_route:
-            step = int(step)
-            if type(self._cursor) is type([]):
-                self._cursor = self._cursor[step]
-            elif type(self._cursor) is type({}):
-                self._cursor = self._cursor['children'][step]
-        return self
     
     def walk(self, *walk_route):
         start = copy.deepcopy(self._cursor)
-        out = self.walk_to(*walk_route).get_cursor()
+        out = self._walk_to(*walk_route).get_cursor()
         self._cursor = start
         return out
         
@@ -177,8 +177,7 @@ class Parser(hp.HTMLParser):
         self._cursor = tag
 
     def handle_data(self, data):
-        self._cursor['data'] += data
-        self._cursor['dataSet'].append(data)
+        self._cursor['data'] .append(data)
 
     def handle_endtag(self, tag):
         self._cursor = self._cursor['parent']
@@ -191,8 +190,7 @@ class Parser(hp.HTMLParser):
     def _create_tag(name, **kwargs):
         out = {
             'name': name,
-            'data': '',
-            'dataSet':  [],
+            'data': [],
             'attributes': {},
             'parent': None,
             'children': []
